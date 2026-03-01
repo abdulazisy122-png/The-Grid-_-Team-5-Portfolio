@@ -264,33 +264,36 @@ const TechTicker = () => {
 };
 
 const CustomCursor = () => {
-  const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
+  const mouseX = useMotionValue(-100);
+  const mouseY = useMotionValue(-100);
   const [isHovering, setIsHovering] = useState(false);
   const [isClicking, setIsClicking] = useState(false);
 
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
-      setMousePos({ x: e.clientX, y: e.clientY });
+      mouseX.set(e.clientX);
+      mouseY.set(e.clientY);
     };
 
     const handleMouseOver = (e: MouseEvent) => {
       const target = e.target as HTMLElement;
-      if (
+      if (!target) return;
+      
+      const isInteractive = 
         target.tagName === 'A' || 
         target.tagName === 'BUTTON' || 
+        target.closest('a') || 
+        target.closest('button') ||
         target.closest('.group') ||
-        target.classList.contains('cursor-pointer')
-      ) {
-        setIsHovering(true);
-      } else {
-        setIsHovering(false);
-      }
+        target.classList.contains('cursor-pointer');
+      
+      setIsHovering(!!isInteractive);
     };
 
     const handleMouseDown = () => setIsClicking(true);
     const handleMouseUp = () => setIsClicking(false);
 
-    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mousemove', handleMouseMove, { passive: true });
     window.addEventListener('mouseover', handleMouseOver);
     window.addEventListener('mousedown', handleMouseDown);
     window.addEventListener('mouseup', handleMouseUp);
@@ -301,28 +304,40 @@ const CustomCursor = () => {
       window.removeEventListener('mousedown', handleMouseDown);
       window.removeEventListener('mouseup', handleMouseUp);
     };
-  }, []);
+  }, [mouseX, mouseY]);
 
-  const springConfig = { damping: 25, stiffness: 250 };
-  const x = useSpring(mousePos.x - 16, springConfig);
-  const y = useSpring(mousePos.y - 16, springConfig);
+  // Very snappy spring for the outer ring
+  const springConfig = { damping: 40, stiffness: 600, mass: 0.3 };
+  const cursorX = useSpring(mouseX, springConfig);
+  const cursorY = useSpring(mouseY, springConfig);
 
   return (
     <>
-      <motion.div
-        style={{ x, y }}
-        className={cn(
-          "fixed top-0 left-0 w-8 h-8 rounded-full border border-accent z-[9999] pointer-events-none mix-blend-difference transition-transform duration-300",
-          isHovering && "scale-[2.5] bg-accent border-none",
-          isClicking && "scale-[0.8]"
-        )}
-      />
+      {/* Outer Ring */}
       <motion.div
         style={{ 
-          x: mousePos.x - 2, 
-          y: mousePos.y - 2 
+          x: cursorX, 
+          y: cursorY,
+          translateX: "-50%",
+          translateY: "-50%",
         }}
-        className="fixed top-0 left-0 w-1 h-1 bg-accent rounded-full z-[9999] pointer-events-none"
+        animate={{
+          scale: isClicking ? 0.8 : isHovering ? 2.5 : 1,
+          backgroundColor: isHovering ? "var(--accent)" : "transparent",
+          borderColor: isHovering ? "transparent" : "var(--accent)",
+        }}
+        className="fixed top-0 left-0 w-8 h-8 rounded-full border z-[9999] pointer-events-none mix-blend-difference"
+      />
+      
+      {/* Inner Dot - No spring for zero latency */}
+      <motion.div
+        style={{ 
+          x: mouseX, 
+          y: mouseY,
+          translateX: "-50%",
+          translateY: "-50%",
+        }}
+        className="fixed top-0 left-0 w-1.5 h-1.5 bg-white z-[10000] rounded-full pointer-events-none"
       />
     </>
   );
@@ -477,11 +492,14 @@ interface TeamMemberProps {
   image: string;
   bio: string;
   index: number;
+  stats: Record<string, string>;
+  education: string;
   key?: string;
 }
 
-const TeamMember = ({ name, role, image, bio, index }: TeamMemberProps) => {
+const TeamMember = ({ name, role, image, bio, index, stats, education }: TeamMemberProps) => {
   const ref = useRef(null);
+  const [isOpen, setIsOpen] = useState(false);
   const { scrollYProgress } = useScroll({
     target: ref,
     offset: ["start end", "end start"]
@@ -490,56 +508,161 @@ const TeamMember = ({ name, role, image, bio, index }: TeamMemberProps) => {
   const y = useTransform(scrollYProgress, [0, 1], [50 * (index % 2 === 0 ? 1 : -1), -50 * (index % 2 === 0 ? 1 : -1)]);
 
   return (
-    <motion.div 
-      ref={ref}
-      style={{ y }}
-      className={cn(
-        "relative group overflow-hidden rounded-sm bg-white/5 border border-white/10 aspect-[3/4]",
-        index % 2 !== 0 ? "md:mt-20" : ""
-      )}
-    >
-      <img 
-        src={image} 
-        alt={name} 
-        className="w-full h-full object-cover grayscale group-hover:grayscale-0 transition-all duration-1000 ease-in-out scale-110 group-hover:scale-100"
-        referrerPolicy="no-referrer"
-      />
-      
-      <div className="absolute inset-0 bg-gradient-to-t from-charcoal via-charcoal/20 to-transparent opacity-90" />
-      
-      <div className="absolute inset-0 p-8 flex flex-col justify-end">
-        <div className="overflow-hidden mb-4">
-          <motion.p 
-            initial={{ y: "100%" }}
-            whileInView={{ y: 0 }}
-            className="text-white/60 text-xs font-medium leading-relaxed italic"
-          >
-            "{bio}"
-          </motion.p>
-        </div>
+    <div className="relative">
+      <motion.div 
+        ref={ref}
+        style={{ y }}
+        className={cn(
+          "relative group overflow-hidden rounded-sm bg-white/5 border border-white/10 aspect-[3/4] z-10",
+          index % 2 !== 0 ? "md:mt-20" : ""
+        )}
+      >
+        <img 
+          src={image} 
+          alt={name} 
+          className="w-full h-full object-cover grayscale group-hover:grayscale-0 transition-all duration-1000 ease-in-out scale-110 group-hover:scale-100"
+          referrerPolicy="no-referrer"
+        />
         
-        <div className="relative">
-          <p className="text-accent text-[10px] uppercase font-black tracking-[0.3em] mb-2">{role}</p>
-          <h3 className="text-3xl font-display font-black uppercase leading-none">{name}</h3>
-          
-          <div className="mt-6 flex gap-4 opacity-0 group-hover:opacity-100 transition-all duration-500 translate-y-4 group-hover:translate-y-0">
-            <Twitter size={18} className="cursor-pointer hover:text-accent" />
-            <Instagram size={18} className="cursor-pointer hover:text-accent" />
-            <Github size={18} className="cursor-pointer hover:text-accent" />
+        <div className="absolute inset-0 bg-gradient-to-t from-charcoal via-charcoal/20 to-transparent opacity-90" />
+        
+        <div className="absolute inset-0 p-8 flex flex-col justify-end">
+          <div className="relative">
+            <p className="text-accent text-[10px] uppercase font-black tracking-[0.3em] mb-2">{role}</p>
+            <h3 className="text-3xl font-display font-black uppercase leading-none mb-6">{name}</h3>
+            
+            <button 
+              onClick={() => setIsOpen(true)}
+              className="group/btn relative px-6 py-3 bg-accent text-black font-black uppercase text-[10px] tracking-widest flex items-center gap-2 overflow-hidden transition-transform active:scale-95"
+            >
+              <span className="relative z-10">View Bio</span>
+              <ArrowRight size={14} className="relative z-10 group-hover/btn:translate-x-1 transition-transform" />
+              <div className="absolute inset-0 bg-white translate-y-full group-hover/btn:translate-y-0 transition-transform duration-300" />
+            </button>
           </div>
         </div>
-      </div>
-    </motion.div>
+      </motion.div>
+
+      {/* Bio Modal */}
+      <AnimatePresence>
+        {isOpen && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 md:p-8">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsOpen(false)}
+              className="absolute inset-0 bg-charcoal/90 backdrop-blur-md"
+            />
+            
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="relative w-full max-w-4xl bg-charcoal border border-white/10 overflow-hidden flex flex-col md:flex-row"
+            >
+              <button 
+                onClick={() => setIsOpen(false)}
+                className="absolute top-4 right-4 z-20 w-10 h-10 rounded-full bg-white/5 flex items-center justify-center hover:bg-accent hover:text-black transition-colors"
+              >
+                <X size={20} />
+              </button>
+
+              <div className="w-full md:w-2/5 aspect-square md:aspect-auto relative overflow-hidden">
+                <img 
+                  src={image} 
+                  alt={name} 
+                  className="w-full h-full object-cover"
+                  referrerPolicy="no-referrer"
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-charcoal to-transparent opacity-60" />
+              </div>
+
+              <div className="w-full md:w-3/5 p-8 md:p-12 flex flex-col">
+                <p className="text-accent text-xs font-black uppercase tracking-[0.4em] mb-4">{role}</p>
+                <h3 className="text-4xl md:text-6xl font-display font-black uppercase leading-none mb-8">{name}</h3>
+                
+                <div className="mb-12">
+                  <p className="text-white/40 text-[10px] uppercase font-black tracking-widest mb-4">Biography</p>
+                  <p className="text-white/80 text-lg leading-relaxed font-medium italic">
+                    "{bio}"
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-12">
+                  <div>
+                    <p className="text-white/40 text-[10px] uppercase font-black tracking-widest mb-4">Education</p>
+                    <h4 className="text-white text-xl font-display font-black uppercase">{education}</h4>
+                  </div>
+                  <div>
+                    <p className="text-white/40 text-[10px] uppercase font-black tracking-widest mb-4">Performance Stats</p>
+                    <div className="grid grid-cols-2 gap-4">
+                      {Object.entries(stats).map(([key, value]) => (
+                        <div key={key} className="border-b border-white/10 pb-2">
+                          <p className="text-white/20 text-[8px] uppercase font-bold">{key}</p>
+                          <p className="text-accent text-lg font-display font-black">{value}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-auto pt-8 border-t border-white/10 flex gap-6">
+                  <Twitter size={20} className="hover:text-accent cursor-pointer transition-colors" />
+                  <Instagram size={20} className="hover:text-accent cursor-pointer transition-colors" />
+                  <Github size={20} className="hover:text-accent cursor-pointer transition-colors" />
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+    </div>
   );
 };
 
 const MeetTheTeam = () => {
   const team = [
-    { name: "ROFA ANDINATA", role: "Lead Developer", bio: "Crafting pixel-perfect logic and high-performance architectures.", image: "https://lh3.googleusercontent.com/u/0/d/1fqL1lh6h-2mXC_am16SPs2monJIgF4HF" },
-    { name: "ABIYYU AMEERI", role: "Creative Director", bio: "Designing intuitive interfaces that bridge the gap between emotion and tech.", image: "https://lh3.googleusercontent.com/u/0/d/1jyxHEvGZkJZOjDFQcdkXB99OLme28aC4" },
-    { name: "RIDHO HANAFI", role: "Motion Artist", bio: "Bringing static pixels to life through fluid motion and cinematic storytelling.", image: "https://lh3.googleusercontent.com/u/0/d/1objhSQt59HZuBN0J9Z3of2exUV43ZpaY" },
-    { name: "LUTHFI ADITYA", role: "Full Stack Dev", bio: "Defining the visual language and strategic vision for digital brands.", image: "https://lh3.googleusercontent.com/u/0/d/1eXo840iUnOgg5iLkfuSIfKYBkqwfS0Sp" },
-    { name: "ABDUL AZIS", role: "UI/UX Designer", bio: "Building robust end-to-end solutions with a focus on scalability.", image: "https://lh3.googleusercontent.com/u/0/d/1RJ_JiK3imxqp9_mRFi_r_eA-J3nwxQXl" },
+    { 
+      name: "ROFA ANDINATA", 
+      role: "Lead Developer", 
+      bio: "Crafting pixel-perfect logic and high-performance architectures.", 
+      image: "https://lh3.googleusercontent.com/u/0/d/1fqL1lh6h-2mXC_am16SPs2monJIgF4HF",
+      stats: { projects: "25+", speed: "99%", accuracy: "98%" },
+      education: "Telkom University"
+    },
+    { 
+      name: "ABIYYU AMEERI", 
+      role: "Creative Director", 
+      bio: "Designing intuitive interfaces that bridge the gap between emotion and tech.", 
+      image: "https://lh3.googleusercontent.com/u/0/d/1jyxHEvGZkJZOjDFQcdkXB99OLme28aC4",
+      stats: { designs: "40+", creativity: "100%", vision: "95%" },
+      education: "Binus University"
+    },
+    { 
+      name: "RIDHO HANAFI", 
+      role: "Motion Artist", 
+      bio: "Bringing static pixels to life through fluid motion and cinematic storytelling.", 
+      image: "https://lh3.googleusercontent.com/u/0/d/1objhSQt59HZuBN0J9Z3of2exUV43ZpaY",
+      stats: { animations: "15+", fluidity: "97%", impact: "94%" },
+      education: "Institut Teknologi Bandung"
+    },
+    { 
+      name: "LUTHFI ADITYA", 
+      role: "Full Stack Dev", 
+      bio: "Defining the visual language and strategic vision for digital brands.", 
+      image: "https://lh3.googleusercontent.com/u/0/d/1eXo840iUnOgg5iLkfuSIfKYBkqwfS0Sp",
+      stats: { fullstack: "20+", logic: "96%", scale: "92%" },
+      education: "Universitas Gadjah Mada"
+    },
+    { 
+      name: "ABDUL AZIS", 
+      role: "UI/UX Designer", 
+      bio: "Building robust end-to-end solutions with a focus on scalability.", 
+      image: "https://lh3.googleusercontent.com/u/0/d/1RJ_JiK3imxqp9_mRFi_r_eA-J3nwxQXl",
+      stats: { ux: "30+", empathy: "99%", research: "95%" },
+      education: "Universitas Indonesia"
+    },
   ];
 
   return (
